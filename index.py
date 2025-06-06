@@ -17,9 +17,7 @@ DEFAULT_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.reactions = True
+intents = discord.Intents.all()
 
 client = discord.Client(intents=intents)
 
@@ -31,24 +29,40 @@ async def on_ready():
 
 @client.event
 async def on_raw_reaction_add(payload):
-    print(f"📩 Reação detectada: {payload.emoji} na mensagem {payload.message_id} por {payload.user_id}")
+    print(f"📩 [raw] Reação detectada: {payload.emoji} na mensagem {payload.message_id} por {payload.user_id}")
 
     if str(payload.emoji.name) != "📌":
-        print("⚠️ Emoji ignorado (não é 📌)")
+        print("⚠️ [raw] Emoji ignorado (não é 📌)")
         return
 
-    print("✅ Emoji 📌 detectado, processando...")
+    print("✅ [raw] Emoji 📌 detectado, tentando buscar a mensagem...")
 
-    channel = client.get_channel(payload.channel_id)
-    message = await channel.fetch_message(payload.message_id)
+    try:
+        channel = client.get_channel(payload.channel_id)
+        if not channel:
+            print(f"❌ [raw] Canal {payload.channel_id} não encontrado.")
+            return
 
-    await handle_jira_card_creation(message)
+        message = await channel.fetch_message(payload.message_id)
+        print(f"✅ [raw] Mensagem encontrada: {message.content[:100]}")
+        await handle_jira_card_creation(message)
+
+    except Exception as e:
+        print("❌ [raw] Erro ao buscar mensagem:", e)
+
+
+@client.event
+async def on_reaction_add(reaction, user):
+    print(f"📩 [normal] Reação detectada: {reaction.emoji} por {user.name}")
+    if str(reaction.emoji) != "📌":
+        print("⚠️ [normal] Emoji ignorado (não é 📌)")
+        return
+
+    print(f"✅ [normal] Processando mensagem: {reaction.message.content[:100]}")
+    await handle_jira_card_creation(reaction.message)
 
 
 def extract_project_and_clean_message(content):
-    """
-    Detecta um prefixo como [PROJ] e retorna o código do projeto e o texto limpo.
-    """
     match = re.match(r"\[(\w+)\]\s*(.+)", content)
     if match:
         project_key = match.group(1)
@@ -58,10 +72,11 @@ def extract_project_and_clean_message(content):
 
 
 async def handle_jira_card_creation(message):
-    project_key, clean_content = extract_project_and_clean_message(message.content)
+    print("🔍 Iniciando geração do card...")
 
+    project_key, clean_content = extract_project_and_clean_message(message.content)
     if not project_key:
-        print("Nenhum projeto detectado, usando o padrão.")
+        print("ℹ️ Nenhum projeto detectado, usando DEFAULT_PROJECT_KEY.")
         project_key = DEFAULT_PROJECT_KEY
 
     prompt = f"""
@@ -102,10 +117,11 @@ Gere com base apenas nessa mensagem:
         create_jira_issue(title, f"{context}\n\n{summary_with_link}", project_key)
 
     except Exception as e:
-        print("Erro ao usar OpenAI:", e)
+        print("❌ Erro ao usar OpenAI:", e)
 
 
 def create_jira_issue(summary, description, project_key):
+    print(f"🚀 Enviando card para Jira ({project_key})...")
     url = f"{JIRA_BASE_URL}/rest/api/3/issue"
 
     auth = (JIRA_EMAIL, JIRA_TOKEN)
