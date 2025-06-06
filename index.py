@@ -31,8 +31,13 @@ async def on_ready():
 
 @client.event
 async def on_raw_reaction_add(payload):
+    print(f"📩 Reação detectada: {payload.emoji} na mensagem {payload.message_id} por {payload.user_id}")
+
     if str(payload.emoji.name) != "📌":
+        print("⚠️ Emoji ignorado (não é 📌)")
         return
+
+    print("✅ Emoji 📌 detectado, processando...")
 
     channel = client.get_channel(payload.channel_id)
     message = await channel.fetch_message(payload.message_id)
