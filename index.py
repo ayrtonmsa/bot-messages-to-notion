@@ -31,7 +31,7 @@ async def on_ready():
 
 @client.event
 async def on_raw_reaction_add(payload):
-    if str(payload.emoji.name) != "🤖":
+    if str(payload.emoji.name) != "📌":
         return
 
     channel = client.get_channel(payload.channel_id)
