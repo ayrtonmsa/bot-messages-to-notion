@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import requests
-from openai import OpenAI
+import openai
 import os
 import re
 import asyncio
@@ -16,7 +16,7 @@ JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
 DEFAULT_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-openAIClient = OpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -118,7 +118,7 @@ Seja claro, técnico e direto ao ponto, mas com contexto suficiente para compree
 Responda em Inglês.
 """
     try:
-        response = openAIClient.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Você é um assistente que transforma mensagens em resumos claros e contextualizados para serem usados como cards no Jira."},
