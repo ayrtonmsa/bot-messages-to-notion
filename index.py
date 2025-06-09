@@ -1,6 +1,6 @@
 import discord
 import requests
-import openai
+from openai import OpenAI
 import os
 import re
 from dotenv import load_dotenv
@@ -15,7 +15,10 @@ JIRA_BASE_URL = os.getenv("JIRA_BASE_URL")
 DEFAULT_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+
+openAIClient = OpenAI(
+  api_key=os.getenv("OPENAI_API_KEY"),
+)
 
 intents = discord.Intents.all()
 
@@ -51,17 +54,6 @@ async def on_raw_reaction_add(payload):
         print("❌ [raw] Erro ao buscar mensagem:", e)
 
 
-@client.event
-async def on_reaction_add(reaction, user):
-    print(f"📩 [normal] Reação detectada: {reaction.emoji} por {user.name}")
-    if str(reaction.emoji) != "📌":
-        print("⚠️ [normal] Emoji ignorado (não é 📌)")
-        return
-
-    print(f"✅ [normal] Processando mensagem: {reaction.message.content[:100]}")
-    await handle_jira_card_creation(reaction.message)
-
-
 def extract_project_and_clean_message(content):
     match = re.match(r"\[(\w+)\]\s*(.+)", content)
     if match:
@@ -84,43 +76,52 @@ A seguinte mensagem foi enviada no Discord:
 
 \"{clean_content}\"
 
-Gere com base apenas nessa mensagem:
-1. Um título curto (até 8 palavras)
-2. Um contexto geral
-3. Um resumo de uma linha que explique o objetivo da mensagem, como se fosse para criar um card no Jira.
+Com base apenas nessa mensagem, elabore:
+
+1. **Título curto (até 8 palavras):**
+   - Deve resumir de forma clara o assunto central.
+
+2. **Contexto detalhado:**
+   - Explique o que motivou a mensagem.
+   - Indique se há um problema, dúvida, sugestão ou solicitação.
+   - Inclua qualquer informação implícita que ajude a entender o cenário.
+
+3. **Resumo objetivo (formato de card no Jira):**
+   - Descreva qual é o objetivo da mensagem.
+   - Se houver um problema, explique-o claramente.
+   - Se houver uma solução proposta, detalhe-a.
+   - Escreva de forma que qualquer membro da equipe entenda o que deve ser feito ou discutido.
+
+Seja claro, técnico e direto ao ponto, mas com contexto suficiente para compreensão completa.
+Responda em Inglês.
 """
 
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "Você é um assistente que ajuda a criar resumos de mensagens para registrar no Jira."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.5
-        )
+        response = openAIClient.chat.completions.create(model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Você é um assistente que transforma mensagens em resumos claros e contextualizados para serem usados como cards no Jira."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.5)
 
         result = response.choices[0].message.content.strip()
-        lines = result.splitlines()
-
-        title = lines[0].replace("Título:", "").strip()
-        context = lines[1].replace("Contexto:", "").strip()
-        summary = lines[2].replace("Resumo:", "").strip()
+        title, context, summary = parse_openai_response(result)
 
         print(f"📝 Criando issue no projeto [{project_key}]")
         print(f"➡️ Título: {title}")
+        print(f"➡️ Contexto: {context}")
         print(f"➡️ Resumo: {summary}")
 
         message_link = message.jump_url
         summary_with_link = f"{summary}\n\n🔗 [Ver mensagem no Discord]({message_link})"
 
-        create_jira_issue(title, f"{context}\n\n{summary_with_link}", project_key)
+        create_jira_issue(f"[BOT] {title}", f"{context}\n\n{summary_with_link}", project_key)
 
     except Exception as e:
         print("❌ Erro ao usar OpenAI:", e)
 
 
-def create_jira_issue(summary, description, project_key):
+def create_jira_issue(summary, description_text, project_key):
     print(f"🚀 Enviando card para Jira ({project_key})...")
     url = f"{JIRA_BASE_URL}/rest/api/3/issue"
 
@@ -131,13 +132,29 @@ def create_jira_issue(summary, description, project_key):
         "Content-Type": "application/json"
     }
 
+    description_adf = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": description_text
+                    }
+                ]
+            }
+        ]
+    }
+
     payload = {
         "fields": {
             "project": {
                 "key": project_key
             },
             "summary": summary,
-            "description": description,
+            "description": description_adf,
             "issuetype": {
                 "name": "Task"
             }
@@ -151,6 +168,38 @@ def create_jira_issue(summary, description, project_key):
     else:
         print(f"❌ Erro ao criar card no Jira {project_key}: {response.status_code}")
         print(response.text)
+
+
+def parse_openai_response(text):
+    title = ""
+    context = ""
+    summary = ""
+
+    lines = text.splitlines()
+    current_section = None
+    buffer = {"title": [], "context": [], "summary": []}
+
+    for line in lines:
+        line_stripped = line.strip().lower()
+
+        if "title" in line_stripped:
+            current_section = "title"
+            continue
+        elif "context" in line_stripped:
+            current_section = "context"
+            continue
+        elif "summary" in line_stripped:
+            current_section = "summary"
+            continue
+
+        if current_section:
+            buffer[current_section].append(line.strip())
+
+    title = " ".join(buffer["title"]).strip()
+    context = " ".join(buffer["context"]).strip()
+    summary = " ".join(buffer["summary"]).strip()
+
+    return title, context, summary
 
 
 client.run(DISCORD_TOKEN)
